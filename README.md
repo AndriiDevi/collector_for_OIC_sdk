@@ -9,3 +9,6 @@ git clone https://github.com/AndriiDevi/collector_for_OIC_sdk.git
 
 pip install -r requirements.txt
 
+git clone https://github.com/lumean/cisco-cspc.git
+cd cisco-cspc
+pip install -r requirements.txt
