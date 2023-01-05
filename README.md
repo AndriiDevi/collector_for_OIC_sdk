@@ -6,7 +6,7 @@ It collects SNMP and CLI data from Cisco devices by using csv seed file (CSPC se
 # Installation
 ```
 git clone https://github.com/AndriiDevi/collector_for_OIC_sdk.git
-
+cd collector_for_OIC_sdk/
 pip install -r requirements.txt
 ```
 
