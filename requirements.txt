@@ -1,0 +1,2 @@
+netmiko>=4.1.2
+pysnmp>=4.4.12
