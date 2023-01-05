@@ -32,9 +32,5 @@ To collect cli commands, netmiko lib should know `device_type` to be able to est
 •	cisco_xe
 •	cisco_xr
 ```
-# configuration
 
-collector_config.py contains dict with all configurable params which you can modify like snmp retries, snmp timeout, seed file name, oids to be collected, cli commands to be collected, etc. it also contains seed file headers to quickly identify the param you are looking for.
-
-ATM the script does not support concurrency so it will pull devices one by one.
 
