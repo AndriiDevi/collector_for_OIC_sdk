@@ -16,7 +16,7 @@ from netmiko.snmp_autodetect import SNMPDetect
 def seed_parsing(config):
     """The function is taking CSPC seed file as an input and returns list of dict with device parameters"""
     if os.path.isfile(f"{config.seed_path}\{config.seed_file_name}") != True:
-        raise FileNotFoundError(f'seed file f"{config.seed_path}\{config.seed_file_name}" not found')
+        raise FileNotFoundError(f'seed file {config.seed_path}\{config.seed_file_name} not found')
     else:
         devices_list = []
         with open(config.seed_file_name, 'r') as file:
