@@ -1,18 +1,18 @@
 import os
 """config file where you can play with params in config dict"""
 config = {'masking':False,
-          'oids_scalar': ('.1.3.6.1.2.1.1.1.0',
-                          '.1.3.6.1.2.1.1.2.0',
-                          '.1.3.6.1.2.1.1.5.0'),
-          'oids_tabular':('.1.3.6.1.2.1.4.20.1',
-                          '.1.3.6.1.2.1.47.1.1.1.1',
-                          '.1.3.6.1.2.1.2.2.1',
-                          '.1.3.6.1.4.1.9.9.92.1.1.1'),
+          'oids_scalar': ('.1.3.6.1.2.1.1.1.0',          # sysDescr  oid
+                          '.1.3.6.1.2.1.1.2.0',          # sysObjectID   oid
+                          '.1.3.6.1.2.1.1.5.0'),         # sysName   oid
+          'oids_tabular':('.1.3.6.1.2.1.4.20.1',         # IP-MIB_ipAddrTable dataset
+                          '.1.3.6.1.2.1.47.1.1.1.1',     # ENTITY-MIB_entPhysical dataset
+                          '.1.3.6.1.2.1.2.2.1',          # IF-MIB_ifTable dataset
+                          '.1.3.6.1.4.1.9.9.92.1.1.1'),  # CISCO-ENTITY-ASSET-MIB_ceAssetTable dataset
           'cli':('show running-config',
                  'show startup-config',
                  'show version'),
-          'cli_timeout': 20,
-          'snmp_timeout': 30,
+          'cli_timeout': 20, #seconds
+          'snmp_timeout': 30, #seconds
           'snmp_retries': 1,
           'seed_path': os.getcwd(),
           'seed_file_name':'oicseed.csv',
