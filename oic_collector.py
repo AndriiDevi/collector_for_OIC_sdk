@@ -508,18 +508,26 @@ class Device_pooling:
             'device_type': self.ssh_device_type,
             "host": self.ip_address,
             "username": self.ssh_user,
-            "password": self.ssh_password
+            "password": self.ssh_password,
+            "secret": self.ssh_enable_password
         }
         try:
             net_connect = ConnectHandler(**device)
+            if self.ssh_password:
+                net_connect.enable()
+                logging.info('switched to enable mode')
+            else:
+                logging.warning('no enable password found, some cli commands may not be collected properly, please check seed file')
             return net_connect
         except Exception as e:
             logging.error(f"ssh connection failed to  : {self.ip_address} with en error: {e}")
+            return None
     def ssh_pooling(self, config):
 
         net_connect = self.ssh_connect()
         collected_cli = []
         if net_connect:
+
             for command in config.cli_to_collect:
                 try:
                     command_output = net_connect.send_command(f"{command}\n", read_timeout=config.cli_timeout)
