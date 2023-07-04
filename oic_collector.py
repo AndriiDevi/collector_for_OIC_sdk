@@ -1,7 +1,6 @@
 import csv
 import os
 import itertools
-import asyncio
 
 import re
 import json
@@ -46,12 +45,6 @@ def make_OIC_json_file(collected_devices):
         logging.info('oic.json has been successfully created')
     except Exception as e:
         logging.error(f'unable to create json file with an error: {e}')
-def chunks(list_of_dev):
-    """Yield successive n-sized chunks from list. It will generate chunks from the entire list for other functions"""
-    n = 2
-
-    for i in range(0, len(list_of_dev), n):
-        yield list_of_dev[i:i + n]
 
 def main():
     logging.basicConfig(
