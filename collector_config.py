@@ -4,26 +4,31 @@ config = {'masking':False,
           'oids_scalar': ('.1.3.6.1.2.1.1.1.0',          # sysDescr  oid
                           '.1.3.6.1.2.1.1.2.0',          # sysObjectID   oid
                           '.1.3.6.1.2.1.1.5.0'),         # sysName   oid
-          'oids_tabular':('.1.3.6.1.2.1.4.20.1',         # IP-MIB_ipAddrTable dataset
+          'oids_tabular': ('.1.3.6.1.2.1.4.20.1',         # IP-MIB_ipAddrTable dataset
                           '.1.3.6.1.2.1.47.1.1.1.1',     # ENTITY-MIB_entPhysical dataset
                           '.1.3.6.1.2.1.2.2.1',          # IF-MIB_ifTable dataset
                           '.1.3.6.1.4.1.9.9.92.1.1.1'),  # CISCO-ENTITY-ASSET-MIB_ceAssetTable dataset
-          'cli':('show running-config',
-                 'show startup-config',
-                 'show version'),
-          'cli_timeout': 20, #seconds
-          'snmp_timeout': 30, #seconds
+          'cli': ('show inventory',
+                  'show interface',
+                  'show environment power',
+                  'show environment power input',
+                  'show environment power detail',
+                  'show environment power detail ampere',
+                  'show module',
+                  'show interface snmp-ifindex'),
+          'cli_timeout': 10, #seconds
+          'snmp_timeout': 15, #seconds
           'snmp_retries': 1,
           'seed_path': os.getcwd(),
-          'seed_file_name':'oicseed.csv',
-          'threads': 20,
+          'seed_file_name':'oicseed1.csv',
+          'threads': 10,
           'seed_headers' : ['IP Address',               #A
                             'Host Name',                #B
                             'Domain Name',              #C
                             'Device Identity',          #D
                             'Display Name',             #E
                             'SysObjectID',              #F
-                            'DCR Device Type',          #G this one will be used for device_type in ssh collection https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
+                            'DCR Device Type',          #G this field will be used for device_type in ssh collection https://github.com/ktbyers/netmiko/blob/develop/PLATFORMS.md
                             'MDF Type',                 #H
                             'Snmp RO',                  #I
                             'Snmp RW',                  #J
@@ -69,5 +74,4 @@ class Config:
         self.seed_file_name = config.get('seed_file_name')
         self.seed_headers = config.get('seed_headers')
         self.masking = config.get('masking')
-
 
