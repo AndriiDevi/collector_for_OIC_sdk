@@ -1,21 +1,35 @@
 import csv
 import os
-import itertools
-
+import logging.handlers
+from concurrent.futures import ThreadPoolExecutor
 import re
 import json
 from collector_config import Config
 from pysnmp.entity.rfc3413.oneliner import cmdgen
+
+
 import logging
 import time
 from netmiko import ConnectHandler
 from netmiko.snmp_autodetect import SNMPDetect
 
 
+def setup_logger(log_file, level=logging.INFO):
+    logger = logging.getLogger()  # get the root logger
+
+    if not logger.handlers:  # check if the logger already has handlers
+        handler = logging.FileHandler(log_file)
+        formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(funcName)s] [%(message)s]')
+        handler.setFormatter(formatter)
+
+        logger.setLevel(level)
+        logger.addHandler(handler)
+    return logger
 def seed_parsing(config):
     """The function is taking CSPC seed file as an input and returns list of dict with device parameters"""
-    if os.path.isfile(f"{config.seed_path}\{config.seed_file_name}") != True:
-        raise FileNotFoundError(f'seed file {config.seed_path}\{config.seed_file_name} not found')
+    print(f"{config.seed_path}/{config.seed_file_name}")
+    if os.path.isfile(f"{config.seed_path}/{config.seed_file_name}") != True:
+        raise FileNotFoundError(f'seed file {config.seed_path}/{config.seed_file_name} not found')
     else:
         devices_list = []
         with open(config.seed_file_name, 'r') as file:
@@ -47,32 +61,37 @@ def make_OIC_json_file(collected_devices):
         logging.error(f'unable to create json file with an error: {e}')
 
 def main():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] [%(funcName)s] %(message)s",
-        handlers=[logging.FileHandler("oic_collector.log")]
-    )
-    logging.info("--------------------------------------------------------------------------------")
-    logging.info("------------------------ SCRIPT JOB STARTED ------------------------------------")
-    logging.info("--------------------------------------------------------------------------------")
+
+    main_logger = setup_logger("oic_collector.log")
+    main_logger.info("--------------------------------------------------------------------------------")
+    main_logger.info("------------------------ SCRIPT JOB STARTED ------------------------------------")
+    main_logger.info("--------------------------------------------------------------------------------")
+
     config = Config()
+    main_logger.info(f"the number of concurrent threads - {config.threads}")
+
     devices = seed_parsing(config)
     start_time = time.time()
     dev_count = 0
+
     all_count = len(devices)
-    all_dev = []
-    for one_device in devices:
+    main_logger.info(f"The device count - {all_count}")
 
-        dev_count +=1
-        dev = Device_pooling(one_device).main_collection(config)
-        if dev:
-            all_dev.append(dev)
-        logging.info(f'processed devices ==> {dev_count}/{all_count}')
+
+    with ThreadPoolExecutor(max_workers=config.threads) as executor:
+        all_dev = list(executor.map(lambda device: Device_pooling(device).main_collection(config), devices))
+    all_dev = [dev for dev in all_dev if dev is not None]  # Filter out None results
     make_OIC_json_file(all_dev)
-    logging.info(f"time taken {round((time.time()-start_time)/60,1)} min")
-    logging.info(f'average collection time per device: {round(((time.time()-start_time)/all_count)/60, 1)} min')
-    logging.info('=========================== script job finished ===========================')
+    main_logger.info(f"time taken {round((time.time() - start_time) / 60, 1)} min")
+    main_logger.info(f"The device count -- {all_count}")
+    main_logger.info(
+        f'average collection time per device: {round(((time.time() - start_time) / all_count) / 60, 1)} min')
 
+    main_logger.info('=========================== script job finished ===========================')
+def read_json_file(file_path):
+    with open(file_path, 'r') as file:
+        data = json.load(file)
+    return data
 
 class Device_pooling:
     count = 1
@@ -97,13 +116,18 @@ class Device_pooling:
         self.ssh_device_type = device_dict.get('DCR Device Type')
         self.device_id = Device_pooling.count
         Device_pooling.count += 1
+        self.logger = setup_logger("oic_collector.log")
+
+        #qh = logging.handlers.QueueHandler(log_queue)
+        #self.logger.addHandler(qh)
+        #self.logger.setLevel(logging.INFO)
 
     def main_collection(self, config):
         """main function to collect data per device"""
-        logging.info(f'--------- collection started for: {self.ip_address} ----------')
+        self.logger.info(f'--------- collection started for: {self.ip_address} ----------')
         if self.snmpv3_user_name:
             result = ''
-            logging.info("snmp v3 selected")
+            self.logger.info(f"snmp v3 selected for {self.hostname}, {self.ip_address}")
             snmpv3_user_config = self.snmp_v3_userdata_generator()
             if snmpv3_user_config:
                 result = self.snmp_V3_poling(config, snmpv3_user_config)
@@ -114,7 +138,7 @@ class Device_pooling:
                         if ssh_data:
                             result["cli_data"] = ssh_data
                     else:
-                        logging.error('unable to  collect cli commands as required parameter <device_type> is missing')
+                        self.logger.error('unable to  collect cli commands as required parameter <device_type> is missing')
                     #else:
                     #    device_type = "cisco_xr"
                     #    ssh_data = self.ssh_pooling(config)
@@ -123,7 +147,7 @@ class Device_pooling:
 
             return result
         elif self.snmpv2_ro:
-            logging.info('snmp v2c selected')
+            self.logger.info(f'snmp v2c selected for {self.hostname}, {self.ip_address}')
             result = self.snmp_v2c_pooling(config)
             if result:
                 if result:
@@ -133,7 +157,7 @@ class Device_pooling:
                         if ssh_data:
                             result["cli_data"] = ssh_data
                     else:
-                        logging.error('unable to  collect cli commands as required parameter <device_type> is missing')
+                        self.logger.error(f'unable to  collect cli commands for {self.hostname}, {self.ip_address} as required parameter <device_type> is missing')
                     #else:
                     #    device_type = "cisco_xr"
                     #    ssh_data = self.ssh_pooling(config, device_type)
@@ -143,7 +167,8 @@ class Device_pooling:
             else:
                 return None
         else:
-            logging.error(f'device: {self.ip_address} does not have any snmp credentials, excluding from collection. Please check seed file')
+            self.logger.error(f'device: {self.ip_address} does not have any snmp credentials, excluding from collection. Please check seed file')
+
 
     def snmp_v2c_pooling(self, config):
         """"collecting snmp OIDs with snmpv2c version. Takes mandatory scaral and tabular OIDs from config file.
@@ -161,13 +186,13 @@ class Device_pooling:
         )
         # Check for errors and print out results
         if errorIndication_s:
-            logging.error(f" scalar OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_s} ")
-            logging.warning('tabular OIDs collection stopped since scalar OID collection FAILED')
+            self.logger.error(f" scalar OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_s} ")
+            self.logger.warning(f'tabular OIDs collection stopped for {self.hostname}, {self.ip_address} since scalar OID collection FAILED')
             return None
         else:
             if errorStatus_s:
-                logging.error(f" scalar OIDs collection FAILED  -> {errorIndication_s} ")
-                logging.error('%s at %s' % (
+                self.logger.error(f" scalar OIDs collection FAILED  -> {errorIndication_s} ")
+                self.logger.error('%s at %s' % (
                     errorStatus_s.prettyPrint(),
                     errorIndex_s and varBinds_s[int(errorIndex_s) - 1] or '?'
                 )
@@ -202,12 +227,12 @@ class Device_pooling:
         )
 
         if errorIndication_t:
-            logging.error(f" tabular OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_t} ")
+            self.logger.error(f"tabular OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_t} ")
             return None
         else:
             if errorStatus_t:
-                logging.error(f" tabular OIDs collection FAILED  -> {errorIndication_t} ")
-                logging.error('%s at %s' % (
+                self.logger.error(f"tabular OIDs collection FAILED  for {self.hostname}, {self.ip_address}-> {errorIndication_t} ")
+                self.logger.error('%s at %s' % (
                     errorStatus_t.prettyPrint(),
                     errorIndex_t and varBindTable_t[-1][int(errorIndex_t) - 1] or '?'
                 )
@@ -244,20 +269,20 @@ class Device_pooling:
                         "UserField4": self.user_field_4
                     }}
         if oids_collected:
-            logging.info('OIDs collection -> SUCCESS')
+            self.logger.info(f'OIDs collection -> SUCCESS for {self.hostname}, {self.ip_address}')
             return template
         else:
-            logging.error('OIDs collection list is empty or FAILED')
+            self.logger.error(f'OIDs collection list is empty or FAILED for {self.hostname}, {self.ip_address}')
             return None
 
     def snmp_v3_userdata_generator(self):
         """Creates UsmUserData config for self.snmp_V3_poling to be able to connect to device"""
-        logging.info(f"starting v3 config with {self.snmpv3_priv_algorithm}")
+        self.logger.info(f"starting v3 config with {self.snmpv3_priv_algorithm} for {self.hostname}, {self.ip_address}")
         if self.snmpv3_auth_algorithm and self.snmpv3_priv_algorithm:
             if self.snmpv3_auth_algorithm == "SHA":
                 if self.snmpv3_priv_algorithm in ("AES-128", "AES-192", "AES-256"):
                     if self.snmpv3_priv_algorithm == "AES-128":
-                        logging.info('AES-128 selected')
+                        self.logger.info(f'AES-128 selected for {self.hostname}, {self.ip_address}')
                         snmpv3_config = cmdgen.UsmUserData(self.snmpv3_user_name, self.snmpv3_auth_password,
                                                            self.snmpv3_priv_password,
                                                            authProtocol=cmdgen.usmHMACSHAAuthProtocol,
@@ -265,7 +290,7 @@ class Device_pooling:
                                                            )
                         return snmpv3_config
                     elif self.snmpv3_priv_algorithm == "AES-192":
-                        logging.info('AES-192 selected')
+                        self.logger.info(f'AES-192 selected for {self.hostname}, {self.ip_address}')
                         snmpv3_config = cmdgen.UsmUserData(self.snmpv3_user_name, self.snmpv3_auth_password,
                                                            self.snmpv3_priv_password,
                                                            authProtocol=cmdgen.usmHMACSHAAuthProtocol,
@@ -273,7 +298,7 @@ class Device_pooling:
                                                            )
                         return snmpv3_config
                     elif self.snmpv3_priv_algorithm == "AES-256":
-                        logging.info('AES-256 selected')
+                        self.logger.info(f'AES-256 selected for {self.hostname}, {self.ip_address}')
                         snmpv3_config = cmdgen.UsmUserData(self.snmpv3_user_name, self.snmpv3_auth_password,
                                                            self.snmpv3_priv_password,
                                                            authProtocol=cmdgen.usmHMACSHAAuthProtocol,
@@ -282,7 +307,7 @@ class Device_pooling:
                         return snmpv3_config
 
                 else:
-                    logging.error(f"snmpv3_priv_algorithm: {self.snmpv3_priv_algorithm} is not supported by module")
+                    self.logger.error(f"snmpv3_priv_algorithm: {self.snmpv3_priv_algorithm} is not supported by module for {self.hostname}, {self.ip_address}")
                     return None
 
             else:
@@ -313,15 +338,15 @@ class Device_pooling:
 
         # Check for errors and print out results
         if errorIndication_s:
-            logging.error(
+            self.logger.error(
                 f" scalar OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_s} ")
-            logging.warning('tabular OIDs collection stopped since scalar OID collection FAILED')
+            self.logger.warning(f'tabular OIDs collection stopped for {self.hostname}, {self.ip_address} since scalar OID collection FAILED')
             return None
         else:
             if errorStatus_s:
-                logging.error(
-                    f" scalar OIDs collection FAILED  -> {errorIndication_s} ")
-                logging.error('%s at %s' % (
+                self.logger.error(
+                    f" scalar OIDs collection FAILED  for {self.hostname}, {self.ip_address} -> {errorIndication_s} ")
+                self.logger.error('%s at %s' % (
                     errorStatus_s.prettyPrint(),
                     errorIndex_s and varBinds_s[int(errorIndex_s) - 1] or '?'
                 )
@@ -355,14 +380,14 @@ class Device_pooling:
         )
 
         if errorIndication_t:
-            logging.error(
+            self.logger.error(
                 f" tabular OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorIndication_t} ")
             return None
         else:
             if errorStatus_t:
-                logging.error(
-                    f" tabular OIDs collection FAILED -> {errorStatus_t} ")
-                logging.error('%s at %s' % (
+                self.logger.error(
+                    f" tabular OIDs collection FAILED for {self.hostname}, {self.ip_address} -> {errorStatus_t} ")
+                self.logger.error('%s at %s' % (
                     errorStatus_t.prettyPrint(),
                     errorIndex_t and varBindTable_t[-1][int(errorIndex_t) - 1] or '?'
                 )
@@ -399,17 +424,17 @@ class Device_pooling:
                         "UserField4": self.user_field_4
                     }}
         if oids_collected:
-            logging.info('OIDs collection -> SUCCESS')
+            self.logger.info(f'OIDs collection for {self.hostname}, {self.ip_address} -> SUCCESS ')
             return template
         else:
-            logging.error('OIDs collection list is empty or FAILED')
+            self.logger.error(f'OIDs collection list is empty or FAILED for {self.hostname}, {self.ip_address}')
             return None
 
     def device_type_detect_snmp_V2c(self):
         """It detects device_type param via snmpv2 protocol which is needed for SSH pooling.
         The function does not return anything, it is just updating self param (self.ssh_device_type) if detected."""
         if self.ssh_device_type:
-            logging.info(f'device_type found in seed file {self.ssh_device_type} for device: {self.ip_address}')
+            self.logger.info(f'device_type found in seed file {self.ssh_device_type} for device: {self.ip_address}')
         else:
             try:
                 my_snmp = SNMPDetect(
@@ -417,18 +442,18 @@ class Device_pooling:
                 )
                 device_type = my_snmp.autodetect()
                 if device_type:
-                    logging.info(f'device_type: {device_type} was detected successfully for {self.ip_address} ')
+                    self.logger.info(f'device_type: {device_type} was detected successfully for {self.ip_address} ')
                     self.ssh_device_type = device_type
                 else:
-                    logging.error(f"unable to detect device_type for device: {self.ip_address}")
+                    self.logger.error(f"unable to detect device_type for device: {self.ip_address}")
             except Exception as e:
-                logging.error(f"unable to detect device type for {self.ip_address} with error {e}")
+                self.logger.error(f"unable to detect device type for {self.ip_address} with error {e}")
 
     def netmiko_SNMPdetect_generator_snmpv3(self):
         encrypt_proto = ''
         if self.snmpv3_auth_algorithm:
             if self.snmpv3_auth_algorithm.lower() == 'sha':
-                logging.info('SHA algorithm selected for SNMPdetect generator')
+                self.logger.info(f'SHA algorithm selected for SNMP detect generator for {self.hostname}, {self.ip_address}')
                 if self.snmpv3_priv_algorithm:
                     encrypt_proto = self.snmpv3_priv_algorithm.lower().replace('-', '')
                 try:
@@ -442,10 +467,10 @@ class Device_pooling:
                     )
                     return my_snmp
                 except Exception as e:
-                    logging.error(f"unable to generate SNMPdetect object for  {self.ip_address} with error {e}")
+                    self.logger.error(f"unable to generate SNMP detect object for  {self.ip_address} with error {e}")
                     return None
             elif self.snmpv3_auth_algorithm.lower() == 'md5':
-                logging.info('MD5 algorithm selected for SNMPdetect generator')
+                self.logger.info(f'MD5 algorithm selected for SNMP detect generator for {self.hostname}, {self.ip_address}')
                 if self.snmpv3_priv_algorithm:
                     encrypt_proto = self.snmpv3_priv_algorithm.lower().replace('-', '')
                 try:
@@ -459,10 +484,10 @@ class Device_pooling:
                     )
                     return my_snmp
                 except Exception as e:
-                    logging.error(f"unable to generate SNMPdetect object for  {self.ip_address} with error {e}")
+                    self.logger.error(f"unable to generate SNMP detect object for  {self.ip_address} with error {e}")
                     return None
         else:
-            logging.info('No SNMPv3 encryption protocol found. Will use basic constructor')
+            self.logger.info(f'No SNMPv3 encryption protocol found. Will use basic constructor for {self.hostname}, {self.ip_address}')
             try:
                 my_snmp = SNMPDetect(
                     self.ip_address,
@@ -472,7 +497,7 @@ class Device_pooling:
                 )
                 return my_snmp
             except Exception as e:
-                logging.error(f"unable to generate SNMPdetect object for  {self.ip_address} with error {e}")
+                self.logger.error(f"unable to generate SNMPdetect object for  {self.ip_address} with error {e}")
                 return None
 
 
@@ -480,7 +505,7 @@ class Device_pooling:
         """It detects device_type param via snmpV3 protocol which is needed for SSH pooling.
         The function does not return anything, it is just updating self param (self.ssh_device_type) if detected."""
         if self.ssh_device_type:
-            logging.info(f'device_type found in seed file: {self.ssh_device_type} for {self.ip_address}')
+            self.logger.info(f'device_type found in seed file: {self.ssh_device_type} for {self.ip_address}')
         else:
             snmp_object = self.netmiko_SNMPdetect_generator_snmpv3()
 
@@ -488,12 +513,12 @@ class Device_pooling:
                 device_type = snmp_object.autodetect()
 
                 if device_type:
-                    logging.info(f'device_type: {device_type} was detected successfully for {self.ip_address} ')
+                    self.logger.info(f'device_type: {device_type} was detected successfully for {self.ip_address} ')
                     self.ssh_device_type = device_type
                 else:
-                    logging.error(f"was unable to detect device_type for device {self.ip_address}")
+                    self.logger.error(f"was unable to detect device_type for device {self.ip_address}")
             except Exception as e:
-                logging.error(f"unable to detect device type for {self.ip_address} with error {e}")
+                self.logger.error(f"unable to detect device type for {self.ip_address} with error {e}")
 
     def ssh_connect(self):
         """Creates ssh connect object which is passing to self.ssh_pooling"""
@@ -508,12 +533,12 @@ class Device_pooling:
             net_connect = ConnectHandler(**device)
             if self.ssh_password:
                 net_connect.enable()
-                logging.info('switched to enable mode')
+                self.logger.info(f'switched to enable mode for {self.hostname}, {self.ip_address}')
             else:
-                logging.warning('no enable password found, some cli commands may not be collected properly, please check seed file')
+                self.logger.warning(f'no enable password found for {self.hostname}, {self.ip_address}, some cli commands may not be collected properly, please check seed file')
             return net_connect
         except Exception as e:
-            logging.error(f"ssh connection failed to  : {self.ip_address} with en error: {e}")
+            self.logger.error(f"ssh connection failed to  : {self.ip_address} with en error: {e}")
             return None
     def ssh_pooling(self, config):
 
@@ -525,9 +550,9 @@ class Device_pooling:
                 try:
                     command_output = net_connect.send_command(f"{command}\n", read_timeout=config.cli_timeout)
                     collected_cli.append({"command": command, "result": command_output})
-                    logging.info(f'command {command} collected')
+                    self.logger.info(f'command {command} collected for for {self.hostname}, {self.ip_address}')
                 except Exception as e:
-                    logging.error(f"failed to collect command: {command} with en error: {e}")
+                    self.logger.error(f"for {self.hostname}, {self.ip_address}, failed to collect command: {command} with en error: {e}")
             net_connect.disconnect()
         return collected_cli
 
@@ -535,3 +560,4 @@ class Device_pooling:
 if __name__ == '__main__':
 
     main()
+
